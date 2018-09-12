@@ -1,0 +1,242 @@
+---
+title: "Кластерный анализ"
+author: "Sazykin Dmitrii"
+date: '11 декабря 2017 г '
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE,message = FALSE)
+library(ggplot2)
+library(psych)
+library(factoextra)
+library(dplyr)
+library(ade4)
+library(shiny)
+library(mclust)
+data("BlueJays")
+df <- read.table("seeds_dataset.txt")
+df <- df %>% mutate(V8 = as.factor(V8)) %>% mutate_at(vars(-V8),scale)
+```
+
+## seeds
+
+Измерения геометрических свойств ядер трех разных сортов пшеницы. [Ссылка на источник](https://archive.ics.uci.edu/ml/datasets/seeds#).
+
+Пример исследуемых объектов
+
+![](wheat.jpg)
+
+
+
+Для построения признаков были использованы следующие параметры ядер пшеницы
+
+  1. area A,
+  2. perimeter P,
+  3. compactness C = 4*pi*A/P^2,
+  4. length of kernel,
+  5. width of kernel,
+  6. asymmetry coefficient
+  7. length of kernel groove. 
+ 
+Описательная статистика по группам и matrixplot.
+ 
+```{r echo=FALSE,fig.align="center"}
+describeBy(df[,-8],df$V8,fast=T)
+pairs.panels(df[,-8],
+             lm=F,smooth = F,ellipses = F,
+             scale = T,cex.cor = 1, gap=0.2,
+             bg=c("red","green","black")[df$V8],pch=21,
+             alpha = 0.5)
+```
+
+Отметим, что данные стандартизованы, так как если мы хотим объединять индивиды в группе на основе каких-то расстояний, то шкалы признаков должны быть по возможности унифицированы.
+
+### Кластерный анализ
+
+Цель кластерного анализа — разбить индивиды на кластеры, т.е., на группы, между
+которыми, в некотором смысле, расстояние больше, чем между точками внутри. Задача
+не формализована и, можно сказать, плохо поставлены, поэтому решается плохо.
+
+
+Вообще, кластерный анализ — это ‘обучение без учителя’. Это означает, что вы не
+сможете формально проверить правильность результата.
+
+Единственный вариант поставить задачу четко — это предположить какую-то стати-
+стическую модель данных и в ней находить параметры, например, по методу максималь-
+ного правдоподобия (model-based clustering).
+
+Все остальные методы — эвристические с плохо определенным (хорошо-плохо) ре-
+зультатом.
+
+
+#### k-means
+
+Метод k-means является итеративным методом кластеризации. Сначала мы инициализируем центроиды (заранее заданное количество). Затем каждую точку относим к ближайшему центроиду и для получившихся кластеров пересчитываем центроиды (как центр масс), повторяем шаги, пока процесс не сойдется.
+
+Минусы: зависит от инициализации (может найти ерунду); несложно придумать пример, когда объединение точек в шарики -- не лучшая идея (вытянутые, близко лежащие эллипсоиды).
+
+k-means++ является модификацией метода, в которой начальные расположения центроидов выбираются не совсем произвольно, что частично решает проблему инициализации.
+
+```{r}
+clust.km <- kmeans(df[,-8],3)
+table(df[,8],clust.km$cluster)
+```
+
+#### Иерархическая кластеризация
+
+Суть иерархической кластеризации в последовательном объединении кластеров с наименьшим межкластерным расстоянием (начинаем с числа кластеров, равного числу индивидов). В хорошем случае по дендрограмме можно увидеть наилучшее число возможных кластеров, с другой стороны, "хорошую" ситуацию можно искусственно вызвать манипуляциями с расстоянием (возведением в квадрат, например), а значит, это не самая надежная мера.
+
+Возможные варианты межкластерного расстояния:
+  * euclidean
+  * maximum
+  * manhattan
+  * canberra
+  * minkowski
+  
+Ниже приведен пример для евклидова межкластерного расстояния.
+
+```{r echo = F}
+if (interactive()) {
+
+inp_dist <- c("euclidean", "maximum", "manhattan", "canberra","minkowski")
+
+ui <- fluidPage(
+  title = 'Иерархическая кластеризация',
+    sidebarPanel(
+    selectInput("dist","Distance",choices = inp_dist, selected = inp_dist[1]),
+    verbatimTextOutput('table')
+  ),
+  mainPanel(
+  plotOutput(outputId = 'plot1')
+  )
+)
+
+server <- function(input, output) {
+  
+  fit <- reactive({
+    d <- dist(df[,-8],method = input$dist)
+    fit <- hclust(d)
+  })
+  
+  output$plot1 <- renderPlot({
+    plot(fit(),labels = F)
+     })
+    
+  output$table <- renderPrint({
+    table(df[,8],cutree(fit(),k = 3))
+  })
+  
+}
+shinyApp(ui = ui, server = server)
+} else {
+  d <- dist(df[, -8], method = "euclidean")
+  fit <- hclust(d)
+  plot(fit, labels = F)
+  table(df[, 8], cutree(fit, k = 3))
+}
+
+```
+
+Как видно, иерархическая кластеризация в данном случае сработала очень плохо (для других расстояний примерно аналогично)
+
+#### Model-based (package "mclust")
+
+В случае model-based мы предполагаем наличие модели (например, нормальной) и с помощью функции правдоподобия пытаемся решить задачу о разделении смеси (EM-алгоритм). В каком-то смысле обобщение k-means.
+
+```{r fig.align='center'}
+cl.BIC <- mclustBIC(df[,-8],G = 1:4)
+summary(cl.BIC)
+fit0.mclust <- Mclust(df[,-8],modelNames = "EEV",G=4)
+fit.mclust <- Mclust(df[,-8],modelNames = "VEV",G=3)
+plot(fit0.mclust,what = "classification")
+plot(fit.mclust,what = "classification")
+table(df[,8],fit.mclust$classification)
+```
+
+
+### КА по главным компонентам
+
+Удобно строить кластерный анализ по главным компонентам: в случае выраженных групп (кластеров), АГК обычно находит в первых компонентах различие между группами. Таким образом, во-первых,  кластеризация по АГК может улучшить качество процедуры. Во-вторых, можно попробовать визуализировать первые компоненты и оценить число кластеров визуально.
+
+Категоризующий признак в анализе не учавствовал и используется исключительно для подсветки данных. Даже не зная истинного числа групп с помощью биплота можно предположить, что их три.
+
+```{r fig.align='center'}
+pca1 <- dudi.pca(df[,-8],scannf = F, nf=8)
+fviz_eig(pca1,addlabels = T)
+fviz_pca_biplot(pca1, repel = TRUE, label = "var",habillage = df[,8])
+```
+
+В нашем случае две первых компоненты хорошо описывают наши данные. 
+
+#### k-means
+
+```{r fig.align='center'}
+Z <- pca1$li[,c(1,2)]
+clust.km <- kmeans(Z,3)
+
+plot(Z, col = clust.km$cluster,
+         pch = 20, cex = 2)
+points(clust.km$centers, pch = 4, cex = 4, lwd = 4)
+table(df[,8],clust.km$cluster)
+```
+
+Итоговая классификация и расположение центроидов. Для k-means качество классификации не особо изменилось, зато теперь можно наглядно посмотреть на работу алгоритма.
+
+#### Иерархическая кластеризация.
+
+```{r echo = F}
+if (interactive()) {
+inp_dist <- c("euclidean", "maximum", "manhattan", "canberra","minkowski")
+
+ui <- fluidPage(
+  title = 'Иерархическая кластеризация',
+    sidebarPanel(
+    selectInput("dist","Distance",choices = inp_dist, selected = inp_dist[1]),
+    verbatimTextOutput('table')
+  ),
+  mainPanel(
+  plotOutput(outputId = 'plot1')
+  )
+)
+
+server <- function(input, output) {
+  
+  fit <- reactive({
+    d <- dist(Z,method = input$dist)
+    fit <- hclust(d)
+  })
+  
+  output$plot1 <- renderPlot({
+    plot(fit(),labels = F)
+     })
+    
+  output$table <- renderPrint({
+    table(df[,8],cutree(fit(),k = 3))
+  })
+  
+}
+shinyApp(ui = ui, server = server)
+
+} else {
+  d <- dist(Z, method = "euclidean")
+  fit <- hclust(d)
+  plot(fit, labels = F)
+  table(df[, 8], cutree(fit, k = 3))
+}
+```
+
+Данные хорошо разбиваются на 3 кластера. Качество классификации сильно выросло.
+
+#### Model-based (package "mclust")
+
+```{r fig.align='center'}
+cl.BIC2 <- mclustBIC(Z,G = 1:4)
+summary(cl.BIC2)
+
+fit.mclust2 <- Mclust(Z,modelNames = "EII",G = 3)
+plot(fit.mclust2,what = "classification")
+table(df[,8],fit.mclust2$classification)
+```
+
+В данном случае выбранная модель "EII" очень похожа на k-means, шарики по направлению одинаковые, но чуть-чуть приплюснутые, поэтому и результат схож.

@@ -1,0 +1,338 @@
+---
+title: "Multiple Linear Regression"
+author: "Sazykin Dmitrii"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, message=FALSE, warning=F, fig.align = "center")
+```
+
+```{r echo=FALSE, message=FALSE, include=FALSE}
+library("lattice")
+library(ggplot2)
+library(psych)
+library("corrgram")
+library("nortest") #lillie.test
+library(ggm) #pcor
+library(QuantPsyc) #beta coef
+df_city <- read.csv2("CITY_2.csv",sep = "\t",dec = ",")
+df <- read.csv2("CITY.csv")
+names_city <- df_city$CITY
+```
+
+
+## CITY
+
+Данные -- города. Признаки:
+
+```{r}
+names(df)
+```
+
+ * CITY -- Название города
+ 
+ * AREA -- Площадь 
+ 
+ * POP80/POP92 -- Население города в 1980/1992 г
+ 
+ * POPDEN -- Плотность
+ 
+ * BORN_F  -- Процент иностранных граждан
+ 
+ * CRIME -- Уровень преступности на 100000 человек, 1991
+ 
+ * INCOME -- Средний доход семьи, 1989
+ 
+ * POVERT -- Процент лиц ниже уровня бедности, 1989
+ 
+ * TEMPER -- Cредняя дневная температура в июле
+ 
+ * UNEMP -- Процент безработных, 1991
+ 
+
+
+
+```{r echo=FALSE, message=FALSE, warning=F, fig.align='center'}
+pairs.panels(df,lm=T,smooth = F,ellipses = F,scale = T,cex.cor = 1.2, gap=0.2)
+```
+
+Преобразуем признаки и уберем аутлаеры. Итоговый результат
+
+```{r echo=FALSE, message=FALSE, warning=F, fig.align='center'}
+pairs.panels(df_city,lm=T,smooth = F,ellipses = F,scale = T,cex.cor = 1.2, gap=0.2)
+```
+
+
+```{r}
+summary(df_city[,-1])
+``` 
+
+## Построение линейной регрессии
+
+Проведем регрессию CRIME на остальные признаки. Так как у нас имеются сильно коррелированные признаки POP80 и POP92, Возьмем только один из них.
+
+```{r echo=FALSE, message=FALSE, warning=F}
+df <- df[,-7]
+```
+
+В наблюдениях имеются NA, а для построения регрессии нам необходимо отсутствие пропусков, поэтому рассмотрим два варианта регрессии.
+ 
+ 1. Рассмотрим все признаки, но выберем только те города, у которы нет пропущенных значений (casewise).
+ 
+ 2. Рассмотрим всех индивидов, но откинем признак INCOME в котором 11 пропусков на 75 индивидов.
+
+### Casewise 
+
+Сначала рассмотрим модель со всеми признаками, такая модель очевидно будет наиболее точной из возможных рассматриваемых, но она будет излишне громоздкой и скорее всего её невозможно будет проинтерпретировать.
+Также, так как средние равны нулю, то удалим из рассмотрения свободный член.
+
+```{r echo=FALSE, message=FALSE, warning=F}
+df_1 <- na.omit(df_city)[,-c(1,8)]
+model_full <-  lm(CRIME~.,df_1)
+summary(model_full)
+```
+Рассматриваемые обозначения
+$$\sum_{i=1}^n(y_i-\bar{y})^2 =\sum_{i=1}^n(\bar{y}-\widehat{y}_i)^2 + \sum_{i=1}^n(y_i-\widehat{y}_i)^2$$
+$$\text{TSS}=\text{ESS}+\text{RSS} $$
+
+Для начала рассмотрим блок Coefficients. Строка Intercept отвечает за свободный член, Estimate это значения $\widehat{b}$, Standart Error. Далее идет проверка гипотезы о равенстве нулю коэффициентов со статистикой критерия (имеет распределение Стьюдента при верной $H_0$)
+$$t_i=\dfrac{\widehat{b}_i-0}{\sqrt{\mathrm{D}\widehat{b}_i}} = \sqrt{n}\dfrac{\widehat{b}_i}{\widehat{\sigma}(\mathbf{S}_{xx}^{-1})^{1/2}_{ii}}\sim t(n-m),\;\;\widehat{\sigma}=\dfrac{\text{RSS}}{n-m}=\dfrac{\sum_{i=1}^n(y_i-\widehat{y}_i)^2}{n-m}.$$
+
+Ниже рассматривается гипотеза $H_0: \mathbf{b}=0$ со статистикой критерия
+$$t=r^2_M(\mathbf{\widehat{b},0};\text{SE}(\mathbf{\widehat{b}}))\sim \text{F}(m-1,n-m), $$
+при верной $H_0$. Оказывается, что $$R^2=\dfrac{\text{ESS}}{\text{TSS}}=1-\dfrac{\text{RSS}}{\text{TSS}} ,$$
+
+$$\text{adjusted}\,R^2 =1-\dfrac{\text{RSS}/(n-m)}{\text{TSS}/(n-1)} $$
+и можно переписать
+$$t=\dfrac{R^2/(m-1)}{(1-R^2)/(n-m)}.$$
+
+### Проблема зависимых "независимых" признаков
+
+Проблемы коррелированых признаков
+ 
+ 1. Дисперсия оценок коэффициентов регрессии стремится к бесконечности
+ 2. Сложно интерпретировать вклад каждого признака
+ 
+Пример. Пусть $\eta=\beta_1\xi_1+\beta_2\xi_2$. Пусть $$\mathbf{X}^\mathrm{T}\mathbf{X}= n\begin{pmatrix}
+1 & \rho\\
+\rho & 1
+\end{pmatrix}.$$
+
+$$\text{cov}\widehat{\beta}=\sigma^2(\mathbf{X}^\mathrm{T}\mathbf{X})^{-1} = \dfrac{\sigma^2}{n(1-\rho^2)} \begin{pmatrix}
+1 & -\rho\\
+-\rho & 1
+\end{pmatrix}\Rightarrow\, \mathrm{D}\widehat{b}_i \xrightarrow[\rho\rightarrow 1]{}\infty .$$
+
+Для отсеивания лишних признаков рассмотим следующие параметры.
+
+1. Множественный коэффициент корреляции $R^2(\xi_i;\{\xi_j, j\neq i\})$.
+$$\mathrm{D}\widehat{b}_i\sim\dfrac{1}{1-R^2(\xi_i;\{\xi_j, j\neq i\})}.$$
+
+Чем больше значение $R^2$, тем выше дисперсия.
+
+2. Частные корреляции $\rho(\xi_i,\eta|\{\xi_j, j\neq i\})$. По смыслу, чем выше данная корреляция, тем больше вклад признака в регрессию.
+
+Таким образом постараемся уменьшить количество признаков на основе данных корреляций.
+
+```{r echo=FALSE, message=FALSE, warning=F}
+my_func <- function(df,...) {
+  r.sq <- numeric(ncol(df)-1)
+  p.cor <- numeric(ncol(df)-1)
+  var_df <- var(df)
+  for (i in 1:(ncol(df)-1)) {
+    form <- paste(colnames(df)[-c(1,i+1)], collapse = "+")
+    form <- paste(colnames(df)[i+1]," ~ ",form)
+    r.sq[i] <- summary(lm(as.formula(paste(form)),df))$r.sq
+    p.cor[i] <- pcor(c(colnames(df)[i+1],"CRIME",colnames(df)[-c(1,i+1)]), var_df)
+  }
+  return(data.frame(names=colnames(df)[-1],r.sq=r.sq,p.cor=p.cor))
+}
+my_func(df_1)
+```
+
+log_AREA и log_POPDEN наиболее предпочтительны для удаления, однако между ними существует сильная корреляция, поэтому не будем спешить выкидывать сразу оба признака и выкинем только log_AREA.
+
+```{r}
+my_func(df_1[,-6])
+```
+
+Как видно, значения $R^2$ явно уменьшились. Следущим на удаление - INCOME
+
+```{r}
+my_func(df_1[,-c(6,2)])
+```
+
+Следующим удалим log_POP92 из-за малого вклада в регрессию
+
+```{r}
+my_func(df_1[,-c(6,7,2)])
+```
+
+Выкидываем UNEMP.
+
+```{r}
+my_func(df_1[,-c(6,7,2,5)])
+```
+
+```{r}
+cut_model <- lm(CRIME~POVERT+TEMPER+log_POPDEN+log_BORN_F,df_1)
+summary(cut_model)
+```
+
+Как видно, на этом останавливаться пока рано.
+
+Уберем TEMPER.
+
+```{r}
+my_func(df_1[,-c(6,7,2,5,4)])
+```
+
+На этом результате можно уже остановиться.
+
+```{r}
+cut_model <- lm(CRIME~POVERT+log_POPDEN+log_BORN_F,df_1)
+summary(cut_model)
+```
+
+Коэффициенты регрессии стали значимы, adjusted $R^2$ даже увеличился, p-value на порядок уменьшился.
+
+Помимо ручного уменьшения количества признаков, воспользуемся stepwise алгоритмом на основе AIC. В данном случае требуется нормальность признаков, в противном случае результат не обоснован.
+
+```{r echo=FALSE, message=FALSE, warning=F}
+model_back <- step(model_full,direction = "both")
+summary(model_back)
+```
+
+Информационный критерий AIC: $\text{AIC} = - 2\log L + k * edf$, edf - число параметров модели, $k=2$, для BIC $k=\log(n)$. При увелечении числа параметров модели $\log L$ будет расти, но нам нужно найти баланс между информативностью модели и ее сложностью, поэтому на число параметров накладывается штраф. 
+
+В этом случае пришли к той же самой модели CRIME ~ POVERT + log_POPDEN + log_BORN_F. В целом методы backward и forward дают схожий результат, однако метод backward предпочтительней, так как при работе алгоритма возможны промежутки, когда $R^2$ почти не изменяется, но лишние признаки все арвно присутствуют. Both метод на каждом шаге будет рассматривать возможные включения и исключения признаков и является самый предпочтительным вариантом.
+
+Рассмотрим отобранные признаки.
+
+```{r echo=FALSE, message=FALSE, warning=F}
+pairs.panels(df_1[,c(1,3,8,9)],lm=T,smooth = F,ellipses = F,scale = T,cex.cor = 1.2, gap=0.2)
+```
+
+Так как признак INCOME оказался не значимым для регрессии, то увеличим точность регрессии за счет рассмотрения исходных данных без признака INCOME, содержащего 11 пропусков.
+
+```{r echo=FALSE, message=FALSE, warning=F}
+df_2 <- na.omit(df_city[-c(1,3,8)])
+model_full_2 <- lm(CRIME~.,df_2)
+summary(model_full_2)
+```
+
+Заметим, что возрасло значение $R^2$ (0.29 -> 0.36) и уменьшилось p-val (1.7e-02 -> 9e-05).
+
+Повторим процедуру отсеивания признаков
+
+```{r echo=FALSE, message=FALSE, warning=F}
+model_cut_2 <- step(model_full_2,direction = "both",trace=0)
+summary(model_cut_2)
+```
+
+Рассмотрим нормализованные коэффициенты $\beta_i$ для оценки вклада каждого признака.
+
+```{r}
+lm.beta(model_cut_2)
+```
+
+Интерпретация - так как мы нормализовали признаки, то значения коэффициентов $b_i$ и говорят о построенной зависимости.
+
+```{r echo=FALSE, message=FALSE, warning=F,fig.align='center'}
+pairs.panels(df_2[,c(1,2,7,8)],lm=T,smooth = F,ellipses = F,scale = T,cex.cor = 1.2, gap=0.2)
+```
+
+
+### Нормальность модели
+
+```{r echo=FALSE, message=FALSE, warning=F}
+qplot(model_cut_2$residuals,xlab = "Residuals")
+```
+
+```{r echo=F}
+shapiro.test(model_cut_2$residuals)
+```
+
+В случае нормальных остатков имеем точные оценки (доверительные интервалы), иначе имеем только асимптотическую нормальность коэффициентов $b_i$ со всеми вытекающими. В данном случае нормальности нет.
+
+```{r echo=F}
+ggplot(NULL,aes(y=model_cut_2$residuals, x=model_cut_2$fitted.values)) +
+  geom_point()+
+  xlab("Predicted")+
+  ylab("Residuals")+
+  geom_smooth(method = "lm")
+```
+
+В целом можно говорить об адекватности модели, так как никаких нелинейных зависимостей не наблюдается.
+
+
+### Поиск outliers
+
+Рассмотрим график. По оси X отложены полученные остатки (residuals) $r_i=y_i-\widehat{y}_i$, по оси Y отложен остаток при построенной модели без данного индивида $r_i^{(i)}=y_i-\widehat{y}_i^{(i)}$. Если индвид является аутлаером, то тогда остаток без него будет больше, чем в модели с его участием. Стандартизированные остатки - потому что нормировали на корень из дисперсии (среднее равно 0), а стьдентизированные, потому что дисперсия неизвестна и подставляется её оценка. Полученная прямая не является $y=x$, так как, по понятным причинам, $r_i^{(i)}\geq r_i$. 
+
+```{r echo=F}
+ggplot(NULL,aes(x=rstandard(model_cut_2),y=rstudent(model_cut_2))) +
+  xlab("Standardized residuals")+
+  ylab("Studentized deleted residuals ")+
+  geom_point()+
+  ggtitle("Residuals vs Deleted residuals")+
+  geom_abline(intercept = 0,slope = 1,lty=3)+
+  geom_smooth(method = "lm")
+```
+
+На данном графике outliers не видны. 
+
+Аутлаеры по Куку. Рассматривается расстаяние Махаланобиса по ковариационной матрице коэффициентов между вектором коэффициентов и коэффициентами, построенными на множестве без какого-то индивида. Если расстояние велико, то индивид лежит "далеко" от линии регрессии.
+
+```{r, echo = F}
+c.d <- cooks.distance(model_cut_2)
+plot(sort(c.d),ylab="Cook's distance", main = "Cook's distance")
+names_city[c.d>0.15]
+df_2[c.d>0.15,c(1,2,7,8)]
+```
+
+Аутлаеры по Махаланобису. Рассмотим расстояние Махалонобиса до вектора средних по той же матрице в пространстве независимых признаков (не рассматриваем зависимый признак CRIME) (рассматриваем только оставшиеся признаки).
+
+```{r, echo = F}
+m.d <- mahalanobis(x = df_2[,c(2,7,8)],center = apply(df_2[,c(2,7,8)],2,mean),cov = cov(df_2[,c(2,7,8)]))
+plot(sort(m.d),ylab="Mahalanobis distance", main = "Mahalanobis distance")
+names_city[m.d>8]
+df_2[m.d>8,c(1,2,7,8)]
+```
+
+Среди выделяющихся наблюдений те же самые два города. Первый является аутлаером, так как у него нетипично низкая плотность населения (в построенной модели линейной регрессии коэффициент у log_POPDEN равняется -0.30). У второго же просто в целом высокие значения признаков.
+
+```{r}
+plot(c.d,m.d,xlab = "Cook",ylab="Mahalanobis",main = "Cook vs Mahalanobis")
+```
+
+Рассмотрим модель без города с низким показателем POPDEN, так как хоть он и менее удален по обоим расстояниям, чем второй город, данный город мало вписывается в обычную модель.
+
+```{r echo=F, message=F}
+fitt <- lm(CRIME~.,data.frame(subset(df_city,!is.na(CRIME) & CITY!="BOSTON",select = -c(CITY,log_POP80,INCOME))
+))
+model_final <- step(fitt,trace = 0)
+```
+
+```{r}
+summary(model_final)
+```
+
+На самом деле почти ничего не изменилось.
+
+## Итог
+
+
+Построенная регрессия
+```{r echo=F, message=F}
+model_final <- lm(CRIME~POVERT+log_POPDEN+log_BORN_F,subset(df_city,!is.na(CRIME) & CITY!="BOSTON"))
+summary(model_final)
+```
+
+$$\text{CRIME}=13769+297.3\,\text{POVERT}-1238.1\,\text{log_POPDEN} +697.1\,\text{log_BORN_F} .$$
+
+
+
+
+

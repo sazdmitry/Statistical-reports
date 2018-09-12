@@ -1,0 +1,265 @@
+---
+title: "Exploratory Factor analysis"
+author: "Sazykin Dmitrii"
+output: html_document
+---
+
+```{r setup, include=FALSE, fig.align='center'}
+library(psych)
+library(ggplot2)
+library(dplyr)
+library(GPArotation)
+knitr::opts_chunk$set(echo = TRUE,warning=FALSE,messange=F, fig.align = 'center')
+```
+
+## Данные
+
+Индивиды -- города.
+
+```{r echo=F}
+df_city <- na.omit(read.csv2("CITY_2.csv",sep = "\t",dec = ",")[,-1])[,-8]
+str(df_city)
+```
+Признаки:
+
+ * AREA -- Площадь 
+ 
+ * POP80 -- Население города в 1980г
+ 
+ * POPDEN -- Плотность
+ 
+ * BORN_F  -- Процент иностранных граждан
+ 
+ * CRIME -- Уровень преступности на 100000 человек, 1991
+ 
+ * INCOME -- Средний доход семьи, 1989
+ 
+ * POVERT -- Процент лиц ниже уровня бедности, 1989
+ 
+ * TEMPER -- Cредняя дневная температура в июле
+ 
+ * UNEMP -- Процент безработных, 1991
+
+Некоторые признаки для удобства прологарифмированы.
+
+```{r echo=FALSE}
+pairs(df_city)
+```
+
+
+## fa {psych}
+
+Задается число факторов r. Модель факторного анализа
+$$\xi = \mathbf{F}\eta + \varepsilon, $$
+
+где $\xi\in\mathrm R^p$ -- вектор признаков, $\mathbf F \in \mathrm R^{p\times r}$, -- факторные нагрузки, $\eta \in \mathrm R^p$ -- факторы (новые признаки), $\varepsilon$ -- вектор ошибок.
+
+Предполагается, что у всех $F_j$ есть хотя бы два ненулевых значения; данные $\xi$ стандартизованы  ($\mathrm E \xi_i =0$, $\mathrm D \xi_i = 1$), Cov $\varepsilon$ = diag $(\sigma_1^2,\ldots,\sigma_p^2)$; $\varepsilon$ и $\eta$ некоррелированы; Cov $\eta$ = $\mathbf I_r$. Тогда задача сводится к эквивалентной
+
+$$\mathrm{Cov}\xi=\Sigma = \mathbf F \mathbf F ^\mathrm T +\Psi,$$
+
+где $\Psi =  \mathrm{diag}(\sigma_1^2,\ldots,\sigma_p^2)$.
+
+\begin{align*}
+\mathrm{Cov}(\xi)=
+\begin{pmatrix}
+1 & \dots  & \rho_{ij} \\
+\vdots & \ddots & \vdots \\
+\rho_{ji} & \dots  & 1
+\end{pmatrix}
+
+=
+
+\begin{pmatrix}
+1 -\sigma_1^2& \dots  & \rho_{ij} \\
+\vdots & \ddots & \vdots \\
+\rho_{ji} & \dots  & 1 - \sigma_p^2
+\end{pmatrix}
+
+
++
+
+\begin{pmatrix}
+\sigma_1^2& \dots  & 0 \\
+\vdots & \ddots & \vdots \\
+0 & \dots  &  \sigma_p^2
+\end{pmatrix}
+\end{align*}
+
+Находим факторы, апроксимирующие значения вне диагонали. 
+
+$1-\sigma_i^2$ называется общностью i-го признака (communality). Чем больше, тем выраженней структура
+
+$\sigma_i^2$ называется индивидуальностью признака.
+
+$f_{ij}=\rho(\xi_i,\eta_j)$ -- факторные веса.
+
+Результат факторного анализа $\tilde \xi = \mathbf F \eta$. Полученный результат не однозначен: пусть $\mathbf W$ - матрица вращения, тогда $\tilde\xi = (\mathbf{FW^\mathrm T}) (\mathbf W\eta)$, то есть найденные факторы можно вращать как угодно.
+
+---
+
+$$\mathrm{Cov}\xi=\Sigma = \mathbf F \mathbf F ^\mathrm T + \Psi$$
+Число уравнений: $p(p+1)/2+r(r-1)/2$ (второе слагаемое берется для условий однозначности $\mathbf F$, например $\mathbf{F^\mathrm T \Sigma^{-1}F}$ должна быть диагональной).
+
+Число параметров: $pr+p$. 
+
+Число степеней свободы модели $p(p+1)/2+r(r-1)/2 - pr -p = (p-r)^2/2+(p-r)/2$.
+
+Проверим гипотезу о том, что в данных ровно $r$ факторов: $\mathrm H_0:\Sigma=\mathbf{FF^\mathrm T+\mathrm{diag}(\sigma_1^2,\ldots,\sigma_p^2)}$. Статистика критерия при верной гипотезе 
+
+$$ t = (n-1-\frac{2p+4r-5}{6})\log \frac{|\mathbf{\hat F \hat F^\mathrm T + \Psi}|}{|\mathbf{S}|} \sim \chi^2_\frac{(p-r)^2+(p-r)}{2}$$
+
+Частный случай для r=0 называется тестом сферичности Бартлетта (гипотеза о том, что данные не имеют структуры и представляют собой сферу).
+
+Как найти число факторов? Идея: повышаем $r$, первый раз, когда гипотеза не отверглась и есть число факторов (неточный способ).
+
+Можно искать через информационные критерии (но тогда получаем привзяку к модели), можно брать столько, сколько сможем проинтерпретировать.
+
+---
+
+```{r eval=FALSE}
+fa(r,nfactors=1,n.obs = NA,n.iter=1, rotate="oblimin", scores="regression", 
+residuals=FALSE, SMC=TRUE, covar=FALSE,missing=FALSE,impute="median",
+min.err = 0.001,  max.iter = 50,symmetric=TRUE, warnings=TRUE, fm="minres",
+ alpha=.1,p=.05,oblique.scores=FALSE,np.obs=NULL,use="pairwise",cor="cor",
+ correct=.5,weight=NULL,...)
+```
+
+Поиск матрицы поворота (ортогональные или косоугольные):
+
+> rotate	
+"none", "varimax", "quartimax", "bentlerT", "equamax", "varimin", "geominT" and "bifactor" are orthogonal rotations. "Promax", "promax", "oblimin", "simplimax", "bentlerQ, "geominQ" and "biquartimin" and "cluster" are possible oblique transformations of the solution.
+
+Нахождение матрицы факторных нагрузок:
+
+> fm	
+"minres", "uls", "wls", "gls", "pa", "ml" (maximum likelihood), "minchi", "minrank", "old.min", "alpha".
+
+Нахождение факторов (обычно сами факторы не находят и анализируют матрицу факторных нагрузок):
+
+> scores	
+the default="regression" finds factor scores using regression. Alternatives for estimating factor scores include simple regression ("Thurstone"), correlaton preserving ("tenBerge") as well as "Anderson" and "Bartlett" using the appropriate algorithms ( factor.scores). Although scores="tenBerge" is probably preferred for most solutions, it will lead to problems with some improper correlation matrices.
+
+---
+
+Вычислим оптимальное количество факторов.
+
+```{r}
+parallel <- fa.parallel(df_city, fm = 'minres', fa = 'fa')
+```
+
+Рекоммендованное число факторов -- 4.
+
+Другой способ оценки числа факторов
+
+```{r echo=T}
+nfactors(df_city,rotate="varimax",fm="minres")
+```
+
+Здесь VSS -- это Very Simple Structure. 
+О том, как работает VSS: "The VSS criterion compares the fit of the simplified model to the original correlations: VSS = 1 - sumsquares(r') / sumsquares(r) where R' is the residual matrix R' and r' and r are the elements of R' and R respectively".
+
+При этом (см. Википедию) учитываются только старшие loadings, малые значения заменяются на нуль (за счёт этого и достигается "простая структура"). VSS complexity 2 отличается тем, что учитываются только два наибольших loadings, все остальные приравниваются к нулю. 
+
+Следующий метод -- Velicer's minimum average partial (MAP). Основывается на общей дисперсии корреляционной матрицы. Выполняется PCA, а потом рассматриваются матрицы частичных корреляций. На первом шаге выбирается первая главная компонента и вычисляется матрица частных корреляций (нас интересует среднее квадратов недиагональных элементов), на втором шаге уже используются две главные компоненты (и они же фиксируются для вычисления матрицы частных корреляций) и так далее. Всего выполняется $k - 1$ шаг, где $k$ -- число переменных. После этого строится график средних квадратов частных корреляций. Считается, что наилучшей оказалась та модель, у которой это число наименьшее. 
+
+Перейдём к BIC. Рассматривается формула 
+$$ -2f_k + a \times q_k, $$
+где $f_k$ -- логарифм функции правдоподобия для модели с $k$ факторами, $q_k$ -- число свободных параметров, а $a = ln(n)$. 
+
+SABIC -- Sample Size adjusted BIC -- отличается от BIC тем, что штраф не такой большой (но штраф так же зависит от объема выборки и числа параметров). 
+
+--- 
+
+```{r warning=F}
+fa_4 <- fa(df_city,nfactors = 4,rotate = "oblimin",fm="minres",warnings = F)
+print(fa_4)
+```
+
+Здесь:
+
+* h2 -- общность;
+* u2 -- индивидуальность;
+* com -- "complexity". Находится как
+$$\frac{(\sum_{i = 1}^m\lambda_i^2)^2}{\sum_{i = 1}^m\lambda_i^4};$$
+* SS loadings -- собственные числа;
+* % of var. -- процент от total variance ($\sum_{i = 1}^p \lambda_i$)
+* Cumulative % of var. -- накопленный процент от общей дисперсии признаков
+* Mean item complexity -- mean(com)
+* Проверка гипотезы о значимости представления ковариационной матрицы в виде $\sum = FF^T + \Psi$ в модели с без факторов и для двух факторов (r = 0 и r = 2).
+
+
+```{r echo=F, warning=F, eval = F}
+Draw <- function(X,Y,labels) {
+  my_plot <- qplot(
+    x = X,
+    y = Y,
+    geom = "point",
+    size = I(1.5),
+    xlim = c(-1, 1),
+    ylim = c(-1, 1)
+    ) +
+    annotate("path",
+    x = cos(seq(0, 2 * pi, length.out = 100)),
+    y = sin(seq(0, 2 * pi, length.out = 100))) +
+    theme(aspect.ratio = 1) +
+    geom_hline(yintercept = 0)+
+    geom_vline(xintercept = 0)+
+    geom_text(aes(label = labels), hjust = 0, vjust = 0) +
+    geom_segment(aes(xend=0,yend=0))
+  print(my_plot)
+}
+fa_no_rotation <- fa(df_city,nfactors = 4,rotate = "none",fm="minres",warnings = F)
+xx <-  diag(10) %*% (as.matrix(fa_no_rotation$loadings[,1:2]))
+fa_varimax <- fa(df_city,nfactors = 4,rotate = "varimax",fm="minres",warnings = F)
+xx2 <- diag(10) %*% (as.matrix(fa_varimax$loadings[,1:2]))
+Draw(xx[,1],xx[,2],names(fa_no_rotation$complexity))
+Draw(xx2[,1],xx2[,2],names(fa_varimax$complexity))
+```
+
+---
+
+factor patter: $\{f_{ij}\}$ коэффициенты линейной комбинации i-го признака перед j-ым фактором
+
+```{r}
+print(fa_4$loadings,cutoff = 0.3)
+```
+
+factor structure: $\{\rho (\xi_i,\eta_j)\}$ корреляции между признаками и факторами
+
+```{r}
+print(fa_4$Structure,cutoff = 0.3)
+```
+
+В случае ортогональных вращений это одно и то же.
+
+#### Косоугольные вращения. 
+
+Косоугольные вращения делаются для лучшей интерпретируемости факторов, однако следует проверять  корреляции между факторами, если они будут слишком высокими, то результат будет бессмысленным (просто подгонка).
+
+```{r}
+fa_obl <- fa(df_city,nfactors = 4,rotate = "oblimin",fm="minres")
+```
+
+Оценка $\mathbf F$ происходит с помощью "minres". Идея метода: минимизируем значения вне диагонали (поиск $\mathbf F$), затем $\Psi = \mathbf I_p - \mathrm{diag}(\mathbf{F F^\mathrm T})$
+
+```{r echo=F}
+print("Oblimin")
+print(fa_obl$loadings,cutoff = 0.3)
+fa.diagram(fa_obl)
+```
+
+В данном случае факторы не сильно коррелируют, но и особой разницы между косоугольными и ортогональными вращениями нет (построено и посмотрено отдельно).
+
+#### Ортогональные вращения.
+
+Оценка матрицы нагрузок происходит по WLS -- взвешенный МНК (с точки зрения ФА признаки с высоким communality более важны)
+
+$$\sum (s_{ij}-\tilde s_{ij})^2/(\hat \sigma_i \hat \sigma_ j) \rightarrow \min_{\tilde S} $$
+
+```{r echo=F}
+print("Varimax")
+fa_var <- fa(df_city,nfactors = 3,rotate = "varimax",fm="wls")
+fa_var
+fa.diagram(fa_var)
+```
